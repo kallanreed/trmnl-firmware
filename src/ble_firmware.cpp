@@ -73,6 +73,14 @@ static bool      g_in_transfer  = false;
 // takes seconds, so it must not run on the NimBLE host task.
 static volatile bool g_render_pending = false;
 
+// A BEGIN that never reaches COMMIT -- client closed the tab, went out of
+// range, crashed mid-send -- would otherwise hold its buffer (up to
+// MAX_IMAGE_SIZE) until the next BEGIN or a disconnect. Abandon it instead,
+// so the device returns to a clean state on its own rather than only when
+// prompted.
+static uint32_t g_last_progress_ms = 0;
+#define TRANSFER_IDLE_TIMEOUT_MS 30000
+
 static NimBLECharacteristic *g_ctrl = nullptr;
 static NimBLECharacteristic *g_stat = nullptr;
 // Held across panel refreshes. FastEPD's bbepWriteRow() paces the parallel
@@ -175,6 +183,7 @@ class CtrlCallbacks : public NimBLECharacteristicCallbacks {
         if (!g_buf) { fail(ERR_NO_MEM); return; }
 
         g_in_transfer = true;
+        g_last_progress_ms = millis();
         ESP_LOGI(TAG, "BLE BEGIN len=%u crc=%08x", g_expected_len, g_expected_crc);
         notify(EV_READY);
         break;
@@ -230,6 +239,7 @@ class DataCallbacks : public NimBLECharacteristicCallbacks {
     g_running_crc = crc32_update(g_running_crc, payload, n);
     g_received += n;
     g_next_seq++;
+    g_last_progress_ms = millis();
 
     // Keep notification traffic light; roughly every 32 chunks.
     if ((g_next_seq & 0x1F) == 0) notify(EV_PROGRESS);
@@ -355,6 +365,14 @@ void ble_fw_process(void) {
     transfer_reset();
     notify(EV_DONE);
     status_refresh();
+  }
+
+  if (g_in_transfer && !g_render_pending &&
+      (millis() - g_last_progress_ms) > TRANSFER_IDLE_TIMEOUT_MS) {
+    ESP_LOGW(TAG, "transfer idle %ums, abandoning %u/%u bytes",
+             TRANSFER_IDLE_TIMEOUT_MS, g_received, g_expected_len);
+    transfer_reset();
+    notify(EV_ERROR, ERR_NOT_BEGUN);
   }
 
   if (millis() - g_last_stat_ms > 30000) {
