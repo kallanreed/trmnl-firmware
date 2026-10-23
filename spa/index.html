@@ -1,121 +1,231 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>TRMNL X Pusher</title>
 <style>
-  :root {
-    --bg: #faf9f7; --fg: #1a1a18; --muted: #6b6a66;
-    --line: #d9d7d2; --accent: #2b6cb0; --ok: #2f7a4d; --err: #a33;
-    --panel: #fff;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #16161a; --fg: #ececea; --muted: #9a9a95;
-      --line: #32323a; --accent: #7aa7d9; --ok: #6cc38d; --err: #e08080;
-      --panel: #1e1e24;
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
-    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
-  }
-  .wrap { max-width: 880px; margin: 0 auto; }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .panel {
-    background: var(--panel); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px; margin-bottom: 16px;
-  }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-  button {
-    font: inherit; padding: 8px 14px; border-radius: 7px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--panel); color: var(--fg);
-  }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  label { font-size: 13px; color: var(--muted); }
-  textarea, input[type=number] {
-    font: inherit; width: 100%; padding: 8px; border-radius: 7px;
-    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
-  }
-  textarea { min-height: 90px; resize: vertical; font-family: ui-monospace, monospace; }
-  canvas { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-  #log {
-    font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap;
-    max-height: 200px; overflow: auto; color: var(--muted);
-  }
-  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
-  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
-  .pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
-  .ok { color: var(--ok); } .err { color: var(--err); }
+:root {
+  color-scheme: dark;
+  font-family: Inter, system-ui, sans-serif;
+  line-height: 1.5;
+  background: #0f1115;
+  color: #f5f7fb;
+  --line: rgba(255, 255, 255, 0.08);
+  --panel: rgba(18, 22, 31, 0.9);
+  --accent: #588dff;
+  --ok: #6cc38d;
+  --err: #e08080;
+  --muted: #9aa3b5;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top, rgba(88, 141, 255, 0.2), transparent 28%),
+    #0f1115;
+}
+button, input, select, textarea { font: inherit; }
+code, .mono { font-family: "SFMono-Regular", ui-monospace, monospace; }
+
+.layout {
+  width: min(760px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.card {
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.2);
+}
+.card h2 {
+  margin: 0 0 .85rem;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--muted);
+}
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; }
+button {
+  padding: .45rem .8rem;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,.04);
+  color: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: rgba(255,255,255,.09); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+select, input[type=text], input[type=number], textarea {
+  padding: .4rem .5rem;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: rgba(0,0,0,.25);
+  color: inherit;
+}
+input[type=color] {
+  width: 38px; height: 34px; padding: 2px;
+  border-radius: 9px; border: 1px solid var(--line);
+  background: rgba(0,0,0,.25);
+}
+textarea { width: 100%; min-height: 70px; resize: vertical; }
+.sliders { display: grid; gap: .5rem; margin-top: .85rem; }
+.slider-row { display: grid; grid-template-columns: 96px 1fr 56px; align-items: center; gap: .6rem; }
+.slider-row label { font-size: .82rem; color: var(--muted); }
+.slider-row output { font-size: .78rem; color: var(--muted); text-align: right; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+
+.canvas-frame {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+  line-height: 0;
+}
+canvas { width: 100%; height: auto; display: block; }
+
+.layer {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: .7rem;
+  margin-bottom: .6rem;
+  background: rgba(0,0,0,.18);
+}
+.layer-row { display: flex; gap: .4rem; align-items: center; margin-bottom: .4rem; flex-wrap: wrap; }
+.layer-row:last-child { margin-bottom: 0; }
+.layer-row .grow { flex: 1 1 140px; }
+.layer-row label { font-size: .78rem; color: var(--muted); min-width: 12px; }
+.layer-row input[type=range] { flex: 1 1 80px; }
+
+.pill {
+  font-size: .76rem; padding: .18rem .55rem;
+  border-radius: 99px; border: 1px solid var(--line); color: var(--muted);
+}
+.pill.ok { color: var(--ok); border-color: rgba(108,195,141,.4); }
+.pill.err { color: var(--err); border-color: rgba(224,128,128,.4); }
+progress { width: 100%; height: 6px; }
+#log {
+  font-family: "SFMono-Regular", ui-monospace, monospace;
+  font-size: .74rem; white-space: pre-wrap; color: var(--muted);
+  max-height: 170px; overflow: auto; margin-top: .6rem;
+}
+.ok { color: var(--ok); } .err { color: var(--err); }
+.meta { font-size: .76rem; color: var(--muted); margin-top: .5rem; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>TRMNL X Pusher</h1>
-  <div class="sub">Pushes images to a TRMNL X over BLE. No WiFi, no network switching.</div>
-
-  <div class="panel">
+<div class="layout">
+  <section class="card">
+    <h2>Source</h2>
     <div class="row">
-      <button id="connect" class="primary">Connect</button>
-      <button id="disconnect" disabled>Disconnect</button>
+      <input id="file" type="file" accept="image/*" />
+      <button id="paste" type="button">Paste</button>
+      <button id="clear" type="button">Clear</button>
+      <button id="rotate" type="button" title="Rotate 90°">Rotate</button>
+      <button id="invert" type="button">Invert: off</button>
+      <input id="bg" type="color" value="#ffffff" title="Background colour" />
+    </div>
+    <p id="imgstatus" class="meta">Blank canvas. Load an image or add a text layer.</p>
+  </section>
+
+  <section class="card">
+    <h2>Adjust</h2>
+    <div class="row">
+      <select id="algorithm">
+        <option value="atkinson" selected>Atkinson</option>
+        <option value="floyd-steinberg">Floyd&ndash;Steinberg</option>
+        <option value="ordered">Ordered Bayer</option>
+        <option value="threshold">Threshold</option>
+      </select>
+      <select id="fit">
+        <option value="contain" selected>Contain</option>
+        <option value="cover">Cover</option>
+        <option value="stretch">Stretch</option>
+      </select>
+      <button id="addtext" type="button">+ Text layer</button>
+    </div>
+    <div class="sliders">
+      <div class="slider-row">
+        <label for="brightness">Brightness</label>
+        <input id="brightness" type="range" min="-100" max="100" value="0" step="1" />
+        <output id="brightness-out">0</output>
+      </div>
+      <div class="slider-row">
+        <label for="contrast">Contrast</label>
+        <input id="contrast" type="range" min="-100" max="100" value="0" step="1" />
+        <output id="contrast-out">0</output>
+      </div>
+      <div class="slider-row" id="threshold-row" style="display:none">
+        <label for="threshold">Threshold</label>
+        <input id="threshold" type="range" min="0" max="255" value="128" step="1" />
+        <output id="threshold-out">128</output>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Layers</h2>
+    <div id="layers"></div>
+    <p id="nolayers" class="meta">No text layers.</p>
+  </section>
+
+  <article class="card">
+    <h2>Preview</h2>
+    <div class="canvas-frame"><canvas id="out" width="1872" height="1404"></canvas></div>
+    <p id="payload" class="meta">&mdash;</p>
+  </article>
+
+  <section class="card">
+    <h2>Device</h2>
+    <div class="row">
+      <button id="connect" class="primary" type="button">Connect</button>
+      <button id="disconnect" type="button" disabled>Disconnect</button>
+      <button id="send" class="primary" type="button" disabled>Send to display</button>
       <span id="status" class="pill">disconnected</span>
       <span id="batt" class="pill" style="display:none"></span>
     </div>
-  </div>
-
-  <div class="panel">
-    <div class="row" style="margin-bottom:10px">
-      <input type="file" id="file" accept="image/*">
-      <label>or type text below</label>
-    </div>
-    <textarea id="text" placeholder="Text to render on the display..."></textarea>
-    <div class="row" style="margin-top:10px">
-      <label>Chunk bytes <input type="number" id="chunk" value="400" min="20" max="500" style="width:90px"></label>
-      <label>Dither
-        <select id="dither">
-          <option value="none">None (threshold)</option>
-          <option value="atkinson" selected>Atkinson</option>
-          <option value="fs">Floyd&ndash;Steinberg</option>
-        </select>
-      </label>
-      <button id="render">Render preview</button>
-      <button id="send" class="primary" disabled>Send to display</button>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="bar"><i id="prog"></i></div>
-    <div id="log" style="margin-top:10px">ready.</div>
-  </div>
-
-  <div class="panel">
-    <canvas id="cv" width="1872" height="1404"></canvas>
-  </div>
+    <progress id="prog" max="100" value="0" style="margin-top:.7rem"></progress>
+    <div id="log">ready.</div>
+  </section>
 </div>
 
 <script>
+// ---------------------------------------------------------------- config ---
 const SVC  = '7a0b0001-5ec4-4d6b-9b1e-2f3a7c1d0001';
 const CTRL = '7a0b0002-5ec4-4d6b-9b1e-2f3a7c1d0002';
 const DATA = '7a0b0003-5ec4-4d6b-9b1e-2f3a7c1d0003';
 const STAT = '7a0b0004-5ec4-4d6b-9b1e-2f3a7c1d0004';
 
-const W = 1872, H = 1404;
+const W = 1872, H = 1404;      // TRMNL X panel, fixed
+const CHUNK = 400;             // payload bytes per BLE write
 // Chrome's writeValueWithoutResponse() resolves when the OS accepts the
-// buffer, NOT when it is transmitted, so it provides no backpressure. Every
-// Nth chunk we issue an acknowledged write instead: ATT guarantees ordering,
-// so its response cannot arrive until the preceding commands were processed.
-// That drains the queue and is what keeps packets from being dropped.
+// buffer, not when it is transmitted, so it gives no backpressure. Every Nth
+// chunk goes out as an acknowledged write instead: ATT ordering means its
+// response cannot arrive until the preceding commands were processed, which
+// drains the queue. Without this the stack silently drops nearly everything.
 const SYNC_EVERY = 12;
+const REF = 1872 / 384;        // text sizes authored at bt-print's 384px scale
+
+const state = {
+  image: null, fileName: null,
+  rotation: 0, invert: false,
+  layers: [], nextLayerId: 1,
+  payload: null,
+  ble: { dev: null, ctrl: null, data: null, connected: false, busy: false },
+};
 
 const $ = id => document.getElementById(id);
-const cv = $('cv'), ctx = cv.getContext('2d', { willReadFrequently: true });
+const src = document.createElement('canvas');   // full-res composition target
 
-let dev = null, ctrl = null, data = null, payload = null;
-
+// ------------------------------------------------------------------ log ---
 function log(m, cls) {
   const t = new Date().toLocaleTimeString();
   $('log').innerHTML += `\n<span class="${cls||''}">[${t}] ${m}</span>`;
@@ -123,7 +233,8 @@ function log(m, cls) {
 }
 function setStatus(s, cls) { $('status').textContent = s; $('status').className = 'pill ' + (cls||''); }
 
-// ---- CRC32 (IEEE, reflected). Used for both the wire protocol and PNG chunks.
+// ---------------------------------------------------------------- CRC32 ---
+// Shared by the wire protocol and the PNG chunk checksums.
 const CRC_TBL = (() => {
   const t = new Uint32Array(256);
   for (let i = 0; i < 256; i++) {
@@ -139,72 +250,124 @@ function crc32(buf) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-// ---- Image conditioning -------------------------------------------------
-function toBW(mode) {
-  const img = ctx.getImageData(0, 0, W, H);
-  const d = img.data;
-  const gray = new Float32Array(W * H);
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    gray[p] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+// ------------------------------------------------------------ pipeline ----
+function toGrayscale(imageData) {
+  const p = imageData.data;
+  const g = new Float32Array(imageData.width * imageData.height);
+  for (let i = 0, o = 0; i < g.length; i++, o += 4) {
+    g[i] = p[o] * 0.299 + p[o + 1] * 0.587 + p[o + 2] * 0.114;
   }
-
-  const put = (x, y, err, frac) => {
-    if (x < 0 || x >= W || y >= H) return;
-    gray[y * W + x] += err * frac;
-  };
-
-  if (mode === 'fs' || mode === 'atkinson') {
-    // Atkinson deliberately propagates only 6/8 of the error, which keeps
-    // blacks and whites from muddying - it reads better on e-ink than
-    // Floyd-Steinberg, at the cost of clipping extreme tones.
-    const atk = 1 / 8;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const p = y * W + x;
-        const old = gray[p];
-        const nw = old < 128 ? 0 : 255;
-        const err = old - nw;
-        gray[p] = nw;
-        if (mode === 'fs') {
-          put(x + 1, y,     err, 7 / 16);
-          put(x - 1, y + 1, err, 3 / 16);
-          put(x,     y + 1, err, 5 / 16);
-          put(x + 1, y + 1, err, 1 / 16);
-        } else {
-          put(x + 1, y,     err, atk);
-          put(x + 2, y,     err, atk);
-          put(x - 1, y + 1, err, atk);
-          put(x,     y + 1, err, atk);
-          put(x + 1, y + 1, err, atk);
-          put(x,     y + 2, err, atk);
-        }
-      }
-    }
-  } else {
-    for (let p = 0; p < gray.length; p++) gray[p] = gray[p] < 128 ? 0 : 255;
-  }
-
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    d[i] = d[i+1] = d[i+2] = gray[p]; d[i+3] = 255;
-  }
-  ctx.putImageData(img, 0, 0);
+  return g;
 }
 
-// ---- Minimal 1-bit grayscale PNG encoder --------------------------------
-// Canvas toBlob() emits 24-bit RGB, which is ~10x larger than it needs to be
-// for a bilevel image. PNGdec on the device handles bit-depth-1 grayscale, so
-// we pack it ourselves and deflate via CompressionStream.
-function pack1bit() {
-  const d = ctx.getImageData(0, 0, W, H).data;
+function applyBrightnessContrast(g, brightness, contrast) {
+  if (!brightness && !contrast) return g;
+  const shift = brightness * 1.28;
+  const factor = contrast >= 0 ? 1 + contrast / 50 : 1 + contrast / 100;
+  const out = new Float32Array(g.length);
+  for (let i = 0; i < g.length; i++) {
+    const v = (g[i] - 128) * factor + 128 + shift;
+    out[i] = v < 0 ? 0 : v > 255 ? 255 : v;
+  }
+  return out;
+}
+
+function invertGrayscale(g) {
+  const out = new Float32Array(g.length);
+  for (let i = 0; i < g.length; i++) out[i] = 255 - g[i];
+  return out;
+}
+
+// Error diffusion is inlined rather than routed through a helper. At
+// 1872x1404 the per-neighbour call overhead dominates: ~16M calls per
+// preview, which is far too slow to keep sliders interactive.
+function floydSteinberg(g, w, h) {
+  const b = Float32Array.from(g);
+  const out = new Uint8ClampedArray(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w, next = row + w;
+    const lastRow = y + 1 >= h;
+    for (let x = 0; x < w; x++) {
+      const i = row + x;
+      const nv = b[i] < 128 ? 0 : 255;
+      const e = b[i] - nv;
+      out[i] = nv;
+      if (x + 1 < w) b[i + 1] += e * 0.4375;
+      if (!lastRow) {
+        if (x > 0) b[next + x - 1] += e * 0.1875;
+        b[next + x] += e * 0.3125;
+        if (x + 1 < w) b[next + x + 1] += e * 0.0625;
+      }
+    }
+  }
+  return out;
+}
+
+function atkinson(g, w, h) {
+  const b = Float32Array.from(g);
+  const out = new Uint8ClampedArray(w * h);
+  const F = 1 / 8;
+  for (let y = 0; y < h; y++) {
+    const row = y * w, r1 = row + w, r2 = row + 2 * w;
+    const has1 = y + 1 < h, has2 = y + 2 < h;
+    for (let x = 0; x < w; x++) {
+      const i = row + x;
+      const nv = b[i] < 128 ? 0 : 255;
+      const e = (b[i] - nv) * F;
+      out[i] = nv;
+      if (x + 1 < w) b[i + 1] += e;
+      if (x + 2 < w) b[i + 2] += e;
+      if (has1) {
+        if (x > 0) b[r1 + x - 1] += e;
+        b[r1 + x] += e;
+        if (x + 1 < w) b[r1 + x + 1] += e;
+      }
+      if (has2) b[r2 + x] += e;
+    }
+  }
+  return out;
+}
+
+function orderedDither(g, w, h) {
+  const m = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];
+  const out = new Uint8ClampedArray(w * h);
+  for (let y = 0; y < h; y++) {
+    const mr = m[y & 3], row = y * w;
+    for (let x = 0; x < w; x++) {
+      out[row + x] = g[row + x] >= ((mr[x & 3] + 0.5) / 16) * 255 ? 255 : 0;
+    }
+  }
+  return out;
+}
+
+function thresholdDither(g, w, h, t) {
+  const out = new Uint8ClampedArray(w * h);
+  for (let i = 0; i < g.length; i++) out[i] = g[i] >= t ? 255 : 0;
+  return out;
+}
+
+function ditherImage(g, w, h, algorithm, threshold) {
+  switch (algorithm) {
+    case 'atkinson':  return atkinson(g, w, h);
+    case 'ordered':   return orderedDither(g, w, h);
+    case 'threshold': return thresholdDither(g, w, h, threshold);
+    default:          return floydSteinberg(g, w, h);
+  }
+}
+
+// ------------------------------------------------------------ 1-bit PNG ---
+// canvas.toBlob() emits 24-bit RGB, roughly 10x larger than necessary for a
+// bilevel image. PNGdec on the device reads bit-depth-1 grayscale fine, so
+// pack it directly and deflate with CompressionStream (zlib-wrapped, which
+// is exactly what IDAT expects).
+function pack1bit(values) {
   const stride = (W + 7) >> 3;
   const raw = new Uint8Array((stride + 1) * H);
   for (let y = 0; y < H; y++) {
-    const rowStart = y * (stride + 1);
-    raw[rowStart] = 0; // filter type: None
+    const rowStart = y * (stride + 1), vrow = y * W;
+    raw[rowStart] = 0; // filter: None
     for (let x = 0; x < W; x++) {
-      if (d[(y * W + x) * 4] >= 128) {
-        raw[rowStart + 1 + (x >> 3)] |= (0x80 >> (x & 7));
-      }
+      if (values[vrow + x] >= 128) raw[rowStart + 1 + (x >> 3)] |= 0x80 >> (x & 7);
     }
   }
   return raw;
@@ -220,129 +383,263 @@ function pngChunk(type, body) {
   return out;
 }
 
-async function encodePNG1() {
-  const raw = pack1bit();
-  // CompressionStream('deflate') emits zlib-wrapped data, exactly what IDAT wants.
-  const cs = new CompressionStream('deflate');
+async function encodePNG1(values) {
+  const raw = pack1bit(values);
   const idat = new Uint8Array(await new Response(
-    new Blob([raw]).stream().pipeThrough(cs)).arrayBuffer());
+    new Blob([raw]).stream().pipeThrough(new CompressionStream('deflate'))
+  ).arrayBuffer());
 
   const ihdr = new Uint8Array(13);
   const dv = new DataView(ihdr.buffer);
   dv.setUint32(0, W); dv.setUint32(4, H);
-  ihdr[8] = 1;  // bit depth
-  ihdr[9] = 0;  // color type: grayscale
-  ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  ihdr[8] = 1; ihdr[9] = 0; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
 
   const parts = [
     new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk('IHDR', ihdr),
-    pngChunk('IDAT', idat),
-    pngChunk('IEND', new Uint8Array(0)),
+    pngChunk('IHDR', ihdr), pngChunk('IDAT', idat), pngChunk('IEND', new Uint8Array(0)),
   ];
-  const total = parts.reduce((a, p) => a + p.length, 0);
-  const out = new Uint8Array(total);
+  const out = new Uint8Array(parts.reduce((a, p) => a + p.length, 0));
   let o = 0;
   for (const p of parts) { out.set(p, o); o += p.length; }
   return out;
 }
 
-async function buildPayload() {
-  toBW($('dither').value);
-  payload = await encodePNG1();
-  const raw = ((W + 7) >> 3) * H;
-  log(`payload: ${payload.length} bytes 1-bit PNG (${(raw / payload.length).toFixed(1)}x vs raw), crc ${crc32(payload).toString(16)}`);
-  $('send').disabled = !(ctrl && data);
+// ------------------------------------------------------------ composite ---
+function drawSource(ctx, fit) {
+  ctx.fillStyle = $('bg').value;
+  ctx.fillRect(0, 0, W, H);
+  const img = state.image;
+  if (!img) return;
+
+  const swapped = state.rotation === 90 || state.rotation === 270;
+  const iw = swapped ? img.height : img.width;
+  const ih = swapped ? img.width : img.height;
+
+  let dw, dh;
+  if (fit === 'stretch') { dw = W; dh = H; }
+  else {
+    const s = fit === 'cover' ? Math.max(W / iw, H / ih) : Math.min(W / iw, H / ih);
+    dw = iw * s; dh = ih * s;
+  }
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.translate(W / 2, H / 2);
+  if (state.rotation) ctx.rotate((state.rotation * Math.PI) / 180);
+  const ow = swapped ? dh : dw, oh = swapped ? dw : dh;
+  ctx.drawImage(img, -ow / 2, -oh / 2, ow, oh);
+  ctx.restore();
 }
 
-function renderText(txt) {
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#000';
-  ctx.font = '64px ui-sans-serif, system-ui, sans-serif';
-  ctx.textBaseline = 'top';
-  const lines = [];
-  for (const para of txt.split('\n')) {
-    let line = '';
-    for (const word of para.split(' ')) {
-      const test = line ? line + ' ' + word : word;
-      if (ctx.measureText(test).width > W - 160) { lines.push(line); line = word; }
-      else line = test;
+function drawLayers(ctx) {
+  for (const b of state.layers) {
+    if (!b.text) continue;
+    const size = Math.max(1, Math.round((b.fontSize || 32) * REF));
+    ctx.font = `bold ${size}px ${b.font || 'Impact'}`;
+    ctx.textBaseline = 'top';
+    const x = ((b.xPct ?? 4) / 100) * W;
+    const y = ((b.yPct ?? 4) / 100) * H;
+    const ow = (b.outlineWidth ?? 2) * REF;
+    if (ow > 0) {
+      ctx.strokeStyle = b.outlineColor || '#ffffff';
+      ctx.lineWidth = ow;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(b.text, x, y);
     }
-    lines.push(line);
+    ctx.fillStyle = b.color || '#000000';
+    ctx.fillText(b.text, x, y);
   }
-  lines.forEach((l, i) => ctx.fillText(l, 80, 80 + i * 84));
 }
 
-$('render').onclick = async () => {
-  const f = $('file').files[0];
-  if (f) {
-    const img = new Image();
-    img.src = URL.createObjectURL(f);
-    await img.decode();
-    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
-    const s = Math.min(W / img.width, H / img.height);
-    const w = img.width * s, h = img.height * s;
-    ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
-    URL.revokeObjectURL(img.src);
-  } else {
-    renderText($('text').value || 'Hello from BLE');
+function showBinary(canvas, values) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+  for (let i = 0, o = 0; i < values.length; i++, o += 4) {
+    const v = values[i];
+    d[o] = d[o + 1] = d[o + 2] = v; d[o + 3] = 255;
   }
-  await buildPayload();
-};
+  ctx.putImageData(img, 0, 0);
+}
 
-$('connect').onclick = async () => {
-  if (!navigator.bluetooth) { log('Web Bluetooth unavailable. Use Chrome/Edge over https or localhost.', 'err'); return; }
+// -------------------------------------------------------------- render ----
+let renderTimer = null, rendering = false;
+
+function scheduleRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(renderJob, 140);
+}
+
+async function renderJob() {
+  if (rendering) { scheduleRender(); return; }
+  rendering = true;
   try {
-    setStatus('requesting...');
-    dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
-    dev.addEventListener('gattserverdisconnected', () => {
-      setStatus('disconnected'); $('disconnect').disabled = true; $('connect').disabled = false;
-      $('send').disabled = true; log('disconnected', 'err');
+    $('threshold-row').style.display =
+      $('algorithm').value === 'threshold' ? 'grid' : 'none';
+    $('brightness-out').textContent = $('brightness').value;
+    $('contrast-out').textContent = $('contrast').value;
+    $('threshold-out').textContent = $('threshold').value;
+    $('invert').textContent = 'Invert: ' + (state.invert ? 'on' : 'off');
+
+    src.width = W; src.height = H;
+    const ctx = src.getContext('2d', { willReadFrequently: true });
+    drawSource(ctx, $('fit').value);
+    drawLayers(ctx);
+
+    let g = toGrayscale(ctx.getImageData(0, 0, W, H));
+    g = applyBrightnessContrast(g, Number($('brightness').value), Number($('contrast').value));
+    if (state.invert) g = invertGrayscale(g);
+
+    const values = ditherImage(g, W, H, $('algorithm').value, Number($('threshold').value));
+    showBinary($('out'), values);
+
+    state.payload = await encodePNG1(values);
+    const rawBytes = ((W + 7) >> 3) * H;
+    $('payload').textContent =
+      `${state.payload.length.toLocaleString()} bytes · ${(rawBytes / state.payload.length).toFixed(1)}x vs raw · crc ${crc32(state.payload).toString(16)}`;
+    $('send').disabled = !(state.ble.connected && !state.ble.busy);
+  } catch (e) {
+    log('render failed: ' + e.message, 'err');
+  } finally {
+    rendering = false;
+  }
+}
+
+// -------------------------------------------------------------- layers ----
+function renderLayers() {
+  const host = $('layers');
+  host.innerHTML = '';
+  $('nolayers').style.display = state.layers.length ? 'none' : '';
+  for (const b of state.layers) {
+    const el = document.createElement('div');
+    el.className = 'layer';
+    el.innerHTML = `
+      <div class="layer-row">
+        <input type="text" class="l-text grow" placeholder="Text" value="${(b.text || '').replace(/"/g, '&quot;')}" />
+        <button type="button" class="l-del" title="Remove">&#10005;</button>
+      </div>
+      <div class="layer-row">
+        <select class="l-font">
+          ${['Impact','Arial Black','Georgia','Courier New','system-ui']
+            .map(f => `<option value="${f}"${b.font === f ? ' selected' : ''}>${f}</option>`).join('')}
+        </select>
+        <input type="number" class="l-size" value="${b.fontSize || 32}" min="8" max="200" title="Font size" style="width:72px" />
+        <input type="color" class="l-color" value="${b.color || '#000000'}" title="Text colour" />
+        <input type="color" class="l-ocolor" value="${b.outlineColor || '#ffffff'}" title="Outline colour" />
+        <input type="number" class="l-owidth" value="${b.outlineWidth ?? 2}" min="0" max="20" title="Outline width" style="width:64px" />
+      </div>
+      <div class="layer-row">
+        <label>X</label><input type="range" class="l-x" value="${b.xPct ?? 4}" min="0" max="100" />
+        <label>Y</label><input type="range" class="l-y" value="${b.yPct ?? 4}" min="0" max="100" />
+      </div>`;
+
+    const on = (sel, field, cast = v => v) =>
+      el.querySelector(sel).addEventListener('input', e => {
+        b[field] = cast(e.target.value); scheduleRender();
+      });
+    on('.l-text', 'text');
+    on('.l-font', 'font');
+    on('.l-size', 'fontSize', Number);
+    on('.l-color', 'color');
+    on('.l-ocolor', 'outlineColor');
+    on('.l-owidth', 'outlineWidth', Number);
+    on('.l-x', 'xPct', Number);
+    on('.l-y', 'yPct', Number);
+    el.querySelector('.l-del').addEventListener('click', () => {
+      state.layers = state.layers.filter(x => x.id !== b.id);
+      renderLayers(); scheduleRender();
     });
+    host.appendChild(el);
+  }
+}
+
+// ----------------------------------------------------------- image load ---
+async function loadImage(blob, name) {
+  const img = new Image();
+  const url = URL.createObjectURL(blob);
+  try {
+    img.src = url;
+    await img.decode();
+    state.image = img;
+    state.fileName = name || 'pasted image';
+    $('imgstatus').textContent = `${state.fileName} — ${img.width} × ${img.height}`;
+    scheduleRender();
+  } catch (e) {
+    log('could not decode image: ' + e.message, 'err');
+  } finally {
+    // Revoked after decode(); the bitmap is retained by the Image.
+    URL.revokeObjectURL(url);
+  }
+}
+
+// ------------------------------------------------------------------ BLE ---
+function showStat(buffer) {
+  try {
+    const d = JSON.parse(new TextDecoder().decode(buffer));
+    $('batt').style.display = '';
+    $('batt').textContent =
+      `${d.v.toFixed(3)}V ${d.usb ? '(USB)' : '(batt)'} · up ${(d.up / 3600).toFixed(1)}h · psram ${d.psram_kb}KB`;
+  } catch (_) { /* malformed status is not worth surfacing */ }
+}
+
+async function connect() {
+  if (!navigator.bluetooth) {
+    log('Web Bluetooth unavailable. Use Chrome or Edge over https or localhost.', 'err');
+    return;
+  }
+  try {
+    setStatus('requesting…');
+    const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    state.ble.dev = dev;
+    dev.addEventListener('gattserverdisconnected', () => {
+      state.ble.connected = false;
+      setStatus('disconnected');
+      $('connect').disabled = false; $('disconnect').disabled = true; $('send').disabled = true;
+      $('batt').style.display = 'none';
+      log('disconnected', 'err');
+    });
+
     const gatt = await dev.gatt.connect();
     const svc = await gatt.getPrimaryService(SVC);
-    ctrl = await svc.getCharacteristic(CTRL);
-    data = await svc.getCharacteristic(DATA);
-    await ctrl.startNotifications();
-    ctrl.addEventListener('characteristicvaluechanged', e => {
+    state.ble.ctrl = await svc.getCharacteristic(CTRL);
+    state.ble.data = await svc.getCharacteristic(DATA);
+
+    await state.ble.ctrl.startNotifications();
+    state.ble.ctrl.addEventListener('characteristicvaluechanged', e => {
       const v = new Uint8Array(e.target.value.buffer);
       const code = v[0], err = v[1];
       const got = new DataView(e.target.value.buffer).getUint32(2, true);
-      const names = {0x10:'READY',0x11:'PROGRESS',0x12:'RENDERING',0x13:'DONE',0x1F:'ERROR'};
+      const names = { 0x10:'READY', 0x11:'PROGRESS', 0x12:'RENDERING', 0x13:'DONE', 0x1F:'ERROR' };
       const errs = ['none','too_big','no_mem','seq','overflow','len_mismatch','crc','not_begun'];
-      if (code === 0x1F) log(`device ERROR: ${errs[err]||err} (after ${got} bytes)`, 'err');
+      if (code === 0x1F)      log(`device ERROR: ${errs[err] || err} (after ${got} bytes)`, 'err');
       else if (code === 0x13) log(`device DONE (${got} bytes)`, 'ok');
-      else if (code !== 0x11) log(`device ${names[code]||code}`);
+      else if (code !== 0x11) log(`device ${names[code] || code}`);
     });
+
     try {
       const st = await svc.getCharacteristic(STAT);
-      const showStat = buf => {
-        try {
-          const d = JSON.parse(new TextDecoder().decode(buf));
-          const hrs = (d.up / 3600).toFixed(1);
-          $('batt').style.display = '';
-          $('batt').textContent =
-            `${d.v.toFixed(3)}V ${d.usb ? '(USB)' : '(batt)'} · up ${hrs}h · psram ${d.psram_kb}KB`;
-        } catch (_) {}
-      };
       st.addEventListener('characteristicvaluechanged', e => showStat(e.target.value.buffer));
       await st.startNotifications();
       showStat((await st.readValue()).buffer);
     } catch (e) { log('status characteristic unavailable: ' + e.message); }
 
+    state.ble.connected = true;
     setStatus('connected', 'ok');
     $('connect').disabled = true; $('disconnect').disabled = false;
-    $('send').disabled = !payload;
+    $('send').disabled = !state.payload;
     log('connected to ' + (dev.name || 'device'), 'ok');
-  } catch (e) { log('connect failed: ' + e.message, 'err'); setStatus('disconnected'); }
-};
+  } catch (e) {
+    log('connect failed: ' + e.message, 'err');
+    setStatus('disconnected');
+  }
+}
 
-$('disconnect').onclick = () => { if (dev?.gatt.connected) dev.gatt.disconnect(); };
-
-$('send').onclick = async () => {
-  if (!payload || !ctrl || !data) return;
+async function send() {
+  const { ctrl, data } = state.ble;
+  if (!state.payload || !ctrl || !data) return;
+  state.ble.busy = true;
   $('send').disabled = true;
-  const chunk = Math.max(20, Math.min(500, parseInt($('chunk').value) || 400));
+  const payload = state.payload;
   const canFast = typeof data.writeValueWithoutResponse === 'function';
   try {
     const hdr = new DataView(new ArrayBuffer(9));
@@ -350,35 +647,78 @@ $('send').onclick = async () => {
     hdr.setUint32(1, payload.length, true);
     hdr.setUint32(5, crc32(payload), true);
     await ctrl.writeValue(hdr.buffer);
-    log(`BEGIN sent (${payload.length} bytes, ${chunk}B chunks)`);
+    log(`BEGIN sent (${payload.length} bytes, ${CHUNK}B chunks)`);
 
     const t0 = performance.now();
     let seq = 0;
-    for (let off = 0; off < payload.length; off += chunk) {
-      const slice = payload.subarray(off, Math.min(off + chunk, payload.length));
+    for (let off = 0; off < payload.length; off += CHUNK) {
+      const slice = payload.subarray(off, Math.min(off + CHUNK, payload.length));
       const pkt = new Uint8Array(2 + slice.length);
       new DataView(pkt.buffer).setUint16(0, seq, true);
       pkt.set(slice, 2);
-
       const sync = (seq % SYNC_EVERY) === (SYNC_EVERY - 1);
       if (canFast && !sync) await data.writeValueWithoutResponse(pkt);
-      else                  await data.writeValue(pkt); // acknowledged: drains queue
-
+      else                  await data.writeValue(pkt);
       seq++;
-      if ((seq & 7) === 0) $('prog').style.width = ((off / payload.length) * 100).toFixed(1) + '%';
+      if ((seq & 7) === 0) $('prog').value = (off / payload.length) * 100;
     }
-    $('prog').style.width = '100%';
-    const secs = ((performance.now() - t0) / 1000);
-    log(`sent ${seq} chunks in ${secs.toFixed(1)}s (${(payload.length/1024/secs).toFixed(1)} KB/s)`);
+    $('prog').value = 100;
+    const secs = (performance.now() - t0) / 1000;
+    log(`sent ${seq} chunks in ${secs.toFixed(1)}s (${(payload.length / 1024 / secs).toFixed(1)} KB/s)`);
 
-    await ctrl.writeValue(new Uint8Array([0x02]));  // COMMIT
-    log('COMMIT sent, waiting for panel refresh...');
+    await ctrl.writeValue(new Uint8Array([0x02]));   // COMMIT
+    log('COMMIT sent, waiting for panel refresh…');
   } catch (e) {
     log('send failed: ' + e.message, 'err');
   } finally {
-    $('send').disabled = false;
+    state.ble.busy = false;
+    $('send').disabled = !state.ble.connected;
   }
-};
+}
+
+// ------------------------------------------------------------------ wire ---
+for (const id of ['algorithm','fit','bg','brightness','contrast','threshold']) {
+  $(id).addEventListener('input', scheduleRender);
+}
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadImage(f, f.name);
+});
+$('paste').addEventListener('click', async () => {
+  try {
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find(t => t.startsWith('image/'));
+      if (type) { await loadImage(await item.getType(type)); return; }
+    }
+    log('no image on the clipboard');
+  } catch (e) { log('paste failed: ' + e.message, 'err'); }
+});
+$('clear').addEventListener('click', () => {
+  state.image = null; state.fileName = null;
+  $('file').value = '';
+  $('imgstatus').textContent = 'Blank canvas. Load an image or add a text layer.';
+  scheduleRender();
+});
+$('rotate').addEventListener('click', () => {
+  state.rotation = (state.rotation + 90) % 360;
+  scheduleRender();
+});
+$('invert').addEventListener('click', () => { state.invert = !state.invert; scheduleRender(); });
+$('addtext').addEventListener('click', () => {
+  state.layers.push({
+    id: state.nextLayerId++, text: '', font: 'Impact', fontSize: 32,
+    color: '#000000', outlineColor: '#ffffff', outlineWidth: 2, xPct: 4, yPct: 4,
+  });
+  renderLayers(); scheduleRender();
+});
+$('connect').addEventListener('click', connect);
+$('disconnect').addEventListener('click', () => {
+  if (state.ble.dev?.gatt.connected) state.ble.dev.gatt.disconnect();
+});
+$('send').addEventListener('click', send);
+
+renderLayers();
+renderJob();
 </script>
 </body>
 </html>
