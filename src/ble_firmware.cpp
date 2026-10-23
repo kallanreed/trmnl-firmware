@@ -4,11 +4,24 @@
 #include <NimBLEDevice.h>
 #include <Wire.h>
 
+#include "battery.h"
 #include "config.h"
 #include "display.h"
 #include "filesystem.h"
 #include "pins.h"
-#include "trmnl_log.h"
+#include "globals.h"
+#include "power.h"
+#include "esp_log.h"
+
+// Deliberately not trmnl_log.h: ESP_LOGI(TAG, ) routes to ArduinoLog, which drops
+// everything unless Log.begin() ran, and its LOG_STORE_ONLY default queues
+// lines for an API submission that never happens without WiFi. The
+// Log_*_serial variants return early past their free() calls (app_logger.cpp),
+// leaking two allocations per line. ESP_LOG has neither problem.
+static const char *TAG = "ble_fw";
+
+#include "esp_heap_caps.h"
+#include "esp_pm.h"
 
 #ifdef BOARD_TRMNL_X
 #include "iqs323_task.h"
@@ -24,6 +37,7 @@ void hw_config_init(void);
 #define SVC_UUID  "7a0b0001-5ec4-4d6b-9b1e-2f3a7c1d0001"
 #define CTRL_UUID "7a0b0002-5ec4-4d6b-9b1e-2f3a7c1d0002"
 #define DATA_UUID "7a0b0003-5ec4-4d6b-9b1e-2f3a7c1d0003"
+#define STAT_UUID "7a0b0004-5ec4-4d6b-9b1e-2f3a7c1d0004"
 
 // Control opcodes (client -> device)
 enum : uint8_t {
@@ -60,6 +74,14 @@ static bool      g_in_transfer  = false;
 static volatile bool g_render_pending = false;
 
 static NimBLECharacteristic *g_ctrl = nullptr;
+static NimBLECharacteristic *g_stat = nullptr;
+// Held across panel refreshes. FastEPD's bbepWriteRow() paces the parallel
+// bus with delayMicroseconds() per row; if DFS drops the CPU to min_freq
+// mid-refresh those rows crawl and the 5s task watchdog fires. Pinning
+// ESP_PM_CPU_FREQ_MAX for the duration is the targeted fix -- it keeps DFS
+// savings everywhere except the one place that cannot tolerate them.
+static esp_pm_lock_handle_t g_epd_lock = nullptr;
+static uint32_t g_last_stat_ms = 0;
 
 // ---------------------------------------------------------------- CRC32 ----
 // IEEE 802.3, reflected, init/final 0xFFFFFFFF. Computed incrementally so we
@@ -98,9 +120,35 @@ static void transfer_reset(void) {
 }
 
 static void fail(uint8_t err) {
-  Log_info("BLE transfer failed, err=%u", err);
+  ESP_LOGI(TAG, "BLE transfer failed, err=%u", err);
   transfer_reset();
   notify(EV_ERROR, err);
+}
+
+// ---------------------------------------------------------------- status ----
+// Published so battery drain can be measured rather than guessed at. The
+// gauge only refreshes on gaugeInit(), so take a fresh snapshot each time.
+static void status_refresh(void) {
+  if (!g_stat) return;
+
+  battery().gaugeInit();
+  const float volts = battery().readVoltage();
+  const bool usb = (power().usbStatus() == UsbStatus::CONNECTED);
+  const uint32_t up = millis() / 1000;
+  const uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024;
+  const uint32_t dram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024;
+
+  if (volts < 0) {
+    ESP_LOGW(TAG, "gauge returned %.3f (battery_count=%d)", volts, (int)battery_count);
+  }
+
+  char json[160];
+  snprintf(json, sizeof(json),
+           "{\"v\":%.3f,\"usb\":%d,\"up\":%u,\"psram_kb\":%u,\"dram_kb\":%u}",
+           volts, usb ? 1 : 0, up, psram_free, dram_free);
+
+  g_stat->setValue((uint8_t *)json, strlen(json));
+  g_stat->notify();
 }
 
 // ------------------------------------------------------------- callbacks ----
@@ -127,7 +175,7 @@ class CtrlCallbacks : public NimBLECharacteristicCallbacks {
         if (!g_buf) { fail(ERR_NO_MEM); return; }
 
         g_in_transfer = true;
-        Log_info("BLE BEGIN len=%u crc=%08x", g_expected_len, g_expected_crc);
+        ESP_LOGI(TAG, "BLE BEGIN len=%u crc=%08x", g_expected_len, g_expected_crc);
         notify(EV_READY);
         break;
       }
@@ -136,18 +184,18 @@ class CtrlCallbacks : public NimBLECharacteristicCallbacks {
         if (!g_in_transfer) { fail(ERR_NOT_BEGUN); return; }
         if (g_received != g_expected_len) { fail(ERR_LEN_MISMATCH); return; }
         if (g_running_crc != g_expected_crc) {
-          Log_info("BLE CRC mismatch: got %08x want %08x", g_running_crc, g_expected_crc);
+          ESP_LOGI(TAG, "BLE CRC mismatch: got %08x want %08x", g_running_crc, g_expected_crc);
           fail(ERR_CRC);
           return;
         }
-        Log_info("BLE COMMIT ok, %u bytes", g_received);
+        ESP_LOGI(TAG, "BLE COMMIT ok, %u bytes", g_received);
         notify(EV_RENDERING);
         g_render_pending = true; // ble_fw_process() draws it
         break;
       }
 
       case OP_ABORT:
-        Log_info("BLE ABORT");
+        ESP_LOGI(TAG, "BLE ABORT");
         transfer_reset();
         notify(EV_DONE);
         break;
@@ -172,7 +220,7 @@ class DataCallbacks : public NimBLECharacteristicCallbacks {
     size_t n = v.length() - 2;
 
     if (seq != g_next_seq) {
-      Log_info("BLE seq gap: got %u want %u", seq, g_next_seq);
+      ESP_LOGI(TAG, "BLE seq gap: got %u want %u", seq, g_next_seq);
       fail(ERR_SEQ);
       return;
     }
@@ -190,10 +238,10 @@ class DataCallbacks : public NimBLECharacteristicCallbacks {
 
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer *, NimBLEConnInfo &) override {
-    Log_info("BLE client connected");
+    ESP_LOGI(TAG, "BLE client connected");
   }
   void onDisconnect(NimBLEServer *, NimBLEConnInfo &, int reason) override {
-    Log_info("BLE client disconnected (reason %d)", reason);
+    ESP_LOGI(TAG, "BLE client disconnected (reason %d)", reason);
     transfer_reset();
     NimBLEDevice::startAdvertising();
   }
@@ -202,7 +250,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 // ------------------------------------------------------------------ init ----
 void ble_fw_init(void) {
   Serial.begin(115200);
-  Log_info("TRMNL X BLE firmware starting");
+  ESP_LOGI(TAG, "TRMNL X BLE firmware starting");
 
   // Same hardware bring-up order bl_init() uses for BOARD_TRMNL_X.
   hw_config_init();
@@ -218,7 +266,37 @@ void ble_fw_init(void) {
   filesystem_init();
   Wire.setClock(100000);
 
-  Log_info("Display %ux%u ready", display_width(), display_height());
+  // BQ27427Battery::gaugeInit() bails out early when battery_count is
+  // BATTERY_NONE, so the pack has to be detected first or every reading
+  // comes back as the -1 sentinel. bl_init() does this at bl.cpp:225.
+  battery_count = detect_battery_count();
+  battery_charging = (power().chargingStatus() == ChargingStatus::CHARGING);
+  ESP_LOGI(TAG, "Battery pack: %d cell(s), charging=%d",
+           (int)battery_count, battery_charging ? 1 : 0);
+
+  ESP_LOGI(TAG, "Display %ux%u ready", display_width(), display_height());
+
+  // DFS only -- light sleep is deliberately off on this board.
+  //
+  // For BLE to survive light sleep the S3's BT controller needs a low-power
+  // clock that keeps running: either EXT_32K_XTAL or RTC_SLOW. The X has no
+  // 32.768kHz crystal (CONFIG_RTC_CLK_SRC_INT_RC=y, EXT_CRYS unset), and the
+  // MAIN_XTAL source we must otherwise use cannot hold BLE timing across
+  // light sleep -- advertising stops the moment USB is unplugged.
+  //
+  // RTC_SLOW would permit light sleep, but on internal RC its accuracy is
+  // poor enough to make BLE connections unreliable. Advertising that works
+  // beats advertising that saves power and does not answer.
+  //
+  // DFS plus BT_CTRL_MODEM_SLEEP still apply and cost nothing in function.
+  esp_pm_config_t pm_cfg;
+  pm_cfg.max_freq_mhz = 240;
+  pm_cfg.min_freq_mhz = 80;
+  pm_cfg.light_sleep_enable = false;
+  esp_err_t pm_err = esp_pm_configure(&pm_cfg);
+  ESP_LOGI(TAG, "esp_pm_configure: dfs %u-%uMHz light_sleep=%d err=%d",
+           pm_cfg.min_freq_mhz, pm_cfg.max_freq_mhz,
+           pm_cfg.light_sleep_enable, (int)pm_err);
 
   NimBLEDevice::init("TRMNL-X");
   NimBLEDevice::setMTU(517);
@@ -236,15 +314,23 @@ void ble_fw_init(void) {
       DATA_UUID, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
   data->setCallbacks(new DataCallbacks());
 
+  g_stat = svc->createCharacteristic(
+      STAT_UUID, NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY);
+
   svc->start();
 
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(SVC_UUID);
   adv->setName("TRMNL-X");
   adv->enableScanResponse(true);
+  // 500-1000ms instead of NimBLE's ~20-100ms default. Units are 0.625ms.
+  // Costs a second or so of discovery latency, saves a lot of radio time.
+  adv->setMinInterval(800);
+  adv->setMaxInterval(1600);
   NimBLEDevice::startAdvertising();
 
-  Log_info("BLE advertising as TRMNL-X");
+  status_refresh();
+  ESP_LOGI(TAG, "BLE advertising as TRMNL-X");
 }
 
 // --------------------------------------------------------------- process ----
@@ -252,12 +338,30 @@ void ble_fw_process(void) {
   if (g_render_pending) {
     g_render_pending = false;
 
-    Log_info("Rendering %u bytes", g_received);
+    ESP_LOGI(TAG, "Rendering %u bytes", g_received);
+    const uint32_t t0 = millis();
+    if (g_epd_lock) esp_pm_lock_acquire(g_epd_lock);
     display_show_image(g_buf, (int)g_received, true);
-    Log_info("Render complete");
+    // Deliberately NOT display_sleep(): on the X it calls bbep.deInit(),
+    // which tears down the FastEPD driver without freeing the ~1.9MB of
+    // buffers bbepInitPanel() allocated. The next fullUpdate() then hangs
+    // on a dead driver, and re-running display_init() would leak instead.
+    // It also saves nothing -- display_show_image() calls fullUpdate() with
+    // bKeepOn=false (display.cpp:1963), and bbepFullUpdate() already cuts
+    // the panel rails with bbepEinkPower(pState, 0) on its way out.
+    if (g_epd_lock) esp_pm_lock_release(g_epd_lock);
+    ESP_LOGI(TAG, "Render complete in %u ms", millis() - t0);
 
     transfer_reset();
     notify(EV_DONE);
+    status_refresh();
   }
-  delay(10);
+
+  if (millis() - g_last_stat_ms > 30000) {
+    g_last_stat_ms = millis();
+    status_refresh();
+  }
+
+  // Long enough for tickless idle to actually enter light sleep.
+  delay(100);
 }

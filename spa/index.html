@@ -63,6 +63,7 @@
       <button id="connect" class="primary">Connect</button>
       <button id="disconnect" disabled>Disconnect</button>
       <span id="status" class="pill">disconnected</span>
+      <span id="batt" class="pill" style="display:none"></span>
     </div>
   </div>
 
@@ -100,6 +101,7 @@
 const SVC  = '7a0b0001-5ec4-4d6b-9b1e-2f3a7c1d0001';
 const CTRL = '7a0b0002-5ec4-4d6b-9b1e-2f3a7c1d0002';
 const DATA = '7a0b0003-5ec4-4d6b-9b1e-2f3a7c1d0003';
+const STAT = '7a0b0004-5ec4-4d6b-9b1e-2f3a7c1d0004';
 
 const W = 1872, H = 1404;
 // Chrome's writeValueWithoutResponse() resolves when the OS accepts the
@@ -312,6 +314,22 @@ $('connect').onclick = async () => {
       else if (code === 0x13) log(`device DONE (${got} bytes)`, 'ok');
       else if (code !== 0x11) log(`device ${names[code]||code}`);
     });
+    try {
+      const st = await svc.getCharacteristic(STAT);
+      const showStat = buf => {
+        try {
+          const d = JSON.parse(new TextDecoder().decode(buf));
+          const hrs = (d.up / 3600).toFixed(1);
+          $('batt').style.display = '';
+          $('batt').textContent =
+            `${d.v.toFixed(3)}V ${d.usb ? '(USB)' : '(batt)'} · up ${hrs}h · psram ${d.psram_kb}KB`;
+        } catch (_) {}
+      };
+      st.addEventListener('characteristicvaluechanged', e => showStat(e.target.value.buffer));
+      await st.startNotifications();
+      showStat((await st.readValue()).buffer);
+    } catch (e) { log('status characteristic unavailable: ' + e.message); }
+
     setStatus('connected', 'ok');
     $('connect').disabled = true; $('disconnect').disabled = false;
     $('send').disabled = !payload;
