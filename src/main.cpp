@@ -5,6 +5,20 @@
 #include "power.h"
 #include "qa.h"
 
+#ifdef BLE_FIRMWARE
+// Custom firmware: no WiFi, no cloud. Images arrive over BLE and are handed
+// straight to the stock rendering path. See src/ble_firmware.cpp.
+#include "ble_firmware.h"
+
+void setup() {
+  esp_ota_mark_app_valid_cancel_rollback();
+  ble_fw_init();
+}
+
+void loop() { ble_fw_process(); }
+
+#else // !BLE_FIRMWARE
+
 #ifdef BOARD_TRMNL_X
 #include "display.h"
 #include "esp_sleep.h"
@@ -78,3 +92,5 @@ void setup() {
 #endif // !BOARD_TRMNL_X
 
 void loop() { bl_process(); }
+
+#endif // !BLE_FIRMWARE

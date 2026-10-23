@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TRMNL X Pusher</title>
+<style>
+  :root {
+    --bg: #faf9f7; --fg: #1a1a18; --muted: #6b6a66;
+    --line: #d9d7d2; --accent: #2b6cb0; --ok: #2f7a4d; --err: #a33;
+    --panel: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a; --fg: #ececea; --muted: #9a9a95;
+      --line: #32323a; --accent: #7aa7d9; --ok: #6cc38d; --err: #e08080;
+      --panel: #1e1e24;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .wrap { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    font: inherit; padding: 8px 14px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel); color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  label { font-size: 13px; color: var(--muted); }
+  textarea, input[type=number] {
+    font: inherit; width: 100%; padding: 8px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  }
+  textarea { min-height: 90px; resize: vertical; font-family: ui-monospace, monospace; }
+  canvas { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  #log {
+    font-family: ui-monospace, monospace; font-size: 12px; white-space: pre-wrap;
+    max-height: 200px; overflow: auto; color: var(--muted);
+  }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
+  .pill { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .ok { color: var(--ok); } .err { color: var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>TRMNL X Pusher</h1>
+  <div class="sub">Pushes images to a TRMNL X over BLE. No WiFi, no network switching.</div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="connect" class="primary">Connect</button>
+      <button id="disconnect" disabled>Disconnect</button>
+      <span id="status" class="pill">disconnected</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin-bottom:10px">
+      <input type="file" id="file" accept="image/*">
+      <label>or type text below</label>
+    </div>
+    <textarea id="text" placeholder="Text to render on the display..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <label>Chunk bytes <input type="number" id="chunk" value="400" min="20" max="500" style="width:90px"></label>
+      <label>Dither
+        <select id="dither">
+          <option value="none">None (threshold)</option>
+          <option value="atkinson" selected>Atkinson</option>
+          <option value="fs">Floyd&ndash;Steinberg</option>
+        </select>
+      </label>
+      <button id="render">Render preview</button>
+      <button id="send" class="primary" disabled>Send to display</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="bar"><i id="prog"></i></div>
+    <div id="log" style="margin-top:10px">ready.</div>
+  </div>
+
+  <div class="panel">
+    <canvas id="cv" width="1872" height="1404"></canvas>
+  </div>
+</div>
+
+<script>
+const SVC  = '7a0b0001-5ec4-4d6b-9b1e-2f3a7c1d0001';
+const CTRL = '7a0b0002-5ec4-4d6b-9b1e-2f3a7c1d0002';
+const DATA = '7a0b0003-5ec4-4d6b-9b1e-2f3a7c1d0003';
+
+const W = 1872, H = 1404;
+// Chrome's writeValueWithoutResponse() resolves when the OS accepts the
+// buffer, NOT when it is transmitted, so it provides no backpressure. Every
+// Nth chunk we issue an acknowledged write instead: ATT guarantees ordering,
+// so its response cannot arrive until the preceding commands were processed.
+// That drains the queue and is what keeps packets from being dropped.
+const SYNC_EVERY = 12;
+
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d', { willReadFrequently: true });
+
+let dev = null, ctrl = null, data = null, payload = null;
+
+function log(m, cls) {
+  const t = new Date().toLocaleTimeString();
+  $('log').innerHTML += `\n<span class="${cls||''}">[${t}] ${m}</span>`;
+  $('log').scrollTop = $('log').scrollHeight;
+}
+function setStatus(s, cls) { $('status').textContent = s; $('status').className = 'pill ' + (cls||''); }
+
+// ---- CRC32 (IEEE, reflected). Used for both the wire protocol and PNG chunks.
+const CRC_TBL = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) c = CRC_TBL[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ---- Image conditioning -------------------------------------------------
+function toBW(mode) {
+  const img = ctx.getImageData(0, 0, W, H);
+  const d = img.data;
+  const gray = new Float32Array(W * H);
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    gray[p] = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
+  }
+
+  const put = (x, y, err, frac) => {
+    if (x < 0 || x >= W || y >= H) return;
+    gray[y * W + x] += err * frac;
+  };
+
+  if (mode === 'fs' || mode === 'atkinson') {
+    // Atkinson deliberately propagates only 6/8 of the error, which keeps
+    // blacks and whites from muddying - it reads better on e-ink than
+    // Floyd-Steinberg, at the cost of clipping extreme tones.
+    const atk = 1 / 8;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const p = y * W + x;
+        const old = gray[p];
+        const nw = old < 128 ? 0 : 255;
+        const err = old - nw;
+        gray[p] = nw;
+        if (mode === 'fs') {
+          put(x + 1, y,     err, 7 / 16);
+          put(x - 1, y + 1, err, 3 / 16);
+          put(x,     y + 1, err, 5 / 16);
+          put(x + 1, y + 1, err, 1 / 16);
+        } else {
+          put(x + 1, y,     err, atk);
+          put(x + 2, y,     err, atk);
+          put(x - 1, y + 1, err, atk);
+          put(x,     y + 1, err, atk);
+          put(x + 1, y + 1, err, atk);
+          put(x,     y + 2, err, atk);
+        }
+      }
+    }
+  } else {
+    for (let p = 0; p < gray.length; p++) gray[p] = gray[p] < 128 ? 0 : 255;
+  }
+
+  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+    d[i] = d[i+1] = d[i+2] = gray[p]; d[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// ---- Minimal 1-bit grayscale PNG encoder --------------------------------
+// Canvas toBlob() emits 24-bit RGB, which is ~10x larger than it needs to be
+// for a bilevel image. PNGdec on the device handles bit-depth-1 grayscale, so
+// we pack it ourselves and deflate via CompressionStream.
+function pack1bit() {
+  const d = ctx.getImageData(0, 0, W, H).data;
+  const stride = (W + 7) >> 3;
+  const raw = new Uint8Array((stride + 1) * H);
+  for (let y = 0; y < H; y++) {
+    const rowStart = y * (stride + 1);
+    raw[rowStart] = 0; // filter type: None
+    for (let x = 0; x < W; x++) {
+      if (d[(y * W + x) * 4] >= 128) {
+        raw[rowStart + 1 + (x >> 3)] |= (0x80 >> (x & 7));
+      }
+    }
+  }
+  return raw;
+}
+
+function pngChunk(type, body) {
+  const out = new Uint8Array(12 + body.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, body.length);
+  for (let i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+  out.set(body, 8);
+  dv.setUint32(8 + body.length, crc32(out.subarray(4, 8 + body.length)));
+  return out;
+}
+
+async function encodePNG1() {
+  const raw = pack1bit();
+  // CompressionStream('deflate') emits zlib-wrapped data, exactly what IDAT wants.
+  const cs = new CompressionStream('deflate');
+  const idat = new Uint8Array(await new Response(
+    new Blob([raw]).stream().pipeThrough(cs)).arrayBuffer());
+
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, W); dv.setUint32(4, H);
+  ihdr[8] = 1;  // bit depth
+  ihdr[9] = 0;  // color type: grayscale
+  ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+
+  const parts = [
+    new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', idat),
+    pngChunk('IEND', new Uint8Array(0)),
+  ];
+  const total = parts.reduce((a, p) => a + p.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+async function buildPayload() {
+  toBW($('dither').value);
+  payload = await encodePNG1();
+  const raw = ((W + 7) >> 3) * H;
+  log(`payload: ${payload.length} bytes 1-bit PNG (${(raw / payload.length).toFixed(1)}x vs raw), crc ${crc32(payload).toString(16)}`);
+  $('send').disabled = !(ctrl && data);
+}
+
+function renderText(txt) {
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000';
+  ctx.font = '64px ui-sans-serif, system-ui, sans-serif';
+  ctx.textBaseline = 'top';
+  const lines = [];
+  for (const para of txt.split('\n')) {
+    let line = '';
+    for (const word of para.split(' ')) {
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > W - 160) { lines.push(line); line = word; }
+      else line = test;
+    }
+    lines.push(line);
+  }
+  lines.forEach((l, i) => ctx.fillText(l, 80, 80 + i * 84));
+}
+
+$('render').onclick = async () => {
+  const f = $('file').files[0];
+  if (f) {
+    const img = new Image();
+    img.src = URL.createObjectURL(f);
+    await img.decode();
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    const s = Math.min(W / img.width, H / img.height);
+    const w = img.width * s, h = img.height * s;
+    ctx.drawImage(img, (W - w) / 2, (H - h) / 2, w, h);
+    URL.revokeObjectURL(img.src);
+  } else {
+    renderText($('text').value || 'Hello from BLE');
+  }
+  await buildPayload();
+};
+
+$('connect').onclick = async () => {
+  if (!navigator.bluetooth) { log('Web Bluetooth unavailable. Use Chrome/Edge over https or localhost.', 'err'); return; }
+  try {
+    setStatus('requesting...');
+    dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    dev.addEventListener('gattserverdisconnected', () => {
+      setStatus('disconnected'); $('disconnect').disabled = true; $('connect').disabled = false;
+      $('send').disabled = true; log('disconnected', 'err');
+    });
+    const gatt = await dev.gatt.connect();
+    const svc = await gatt.getPrimaryService(SVC);
+    ctrl = await svc.getCharacteristic(CTRL);
+    data = await svc.getCharacteristic(DATA);
+    await ctrl.startNotifications();
+    ctrl.addEventListener('characteristicvaluechanged', e => {
+      const v = new Uint8Array(e.target.value.buffer);
+      const code = v[0], err = v[1];
+      const got = new DataView(e.target.value.buffer).getUint32(2, true);
+      const names = {0x10:'READY',0x11:'PROGRESS',0x12:'RENDERING',0x13:'DONE',0x1F:'ERROR'};
+      const errs = ['none','too_big','no_mem','seq','overflow','len_mismatch','crc','not_begun'];
+      if (code === 0x1F) log(`device ERROR: ${errs[err]||err} (after ${got} bytes)`, 'err');
+      else if (code === 0x13) log(`device DONE (${got} bytes)`, 'ok');
+      else if (code !== 0x11) log(`device ${names[code]||code}`);
+    });
+    setStatus('connected', 'ok');
+    $('connect').disabled = true; $('disconnect').disabled = false;
+    $('send').disabled = !payload;
+    log('connected to ' + (dev.name || 'device'), 'ok');
+  } catch (e) { log('connect failed: ' + e.message, 'err'); setStatus('disconnected'); }
+};
+
+$('disconnect').onclick = () => { if (dev?.gatt.connected) dev.gatt.disconnect(); };
+
+$('send').onclick = async () => {
+  if (!payload || !ctrl || !data) return;
+  $('send').disabled = true;
+  const chunk = Math.max(20, Math.min(500, parseInt($('chunk').value) || 400));
+  const canFast = typeof data.writeValueWithoutResponse === 'function';
+  try {
+    const hdr = new DataView(new ArrayBuffer(9));
+    hdr.setUint8(0, 0x01);
+    hdr.setUint32(1, payload.length, true);
+    hdr.setUint32(5, crc32(payload), true);
+    await ctrl.writeValue(hdr.buffer);
+    log(`BEGIN sent (${payload.length} bytes, ${chunk}B chunks)`);
+
+    const t0 = performance.now();
+    let seq = 0;
+    for (let off = 0; off < payload.length; off += chunk) {
+      const slice = payload.subarray(off, Math.min(off + chunk, payload.length));
+      const pkt = new Uint8Array(2 + slice.length);
+      new DataView(pkt.buffer).setUint16(0, seq, true);
+      pkt.set(slice, 2);
+
+      const sync = (seq % SYNC_EVERY) === (SYNC_EVERY - 1);
+      if (canFast && !sync) await data.writeValueWithoutResponse(pkt);
+      else                  await data.writeValue(pkt); // acknowledged: drains queue
+
+      seq++;
+      if ((seq & 7) === 0) $('prog').style.width = ((off / payload.length) * 100).toFixed(1) + '%';
+    }
+    $('prog').style.width = '100%';
+    const secs = ((performance.now() - t0) / 1000);
+    log(`sent ${seq} chunks in ${secs.toFixed(1)}s (${(payload.length/1024/secs).toFixed(1)} KB/s)`);
+
+    await ctrl.writeValue(new Uint8Array([0x02]));  // COMMIT
+    log('COMMIT sent, waiting for panel refresh...');
+  } catch (e) {
+    log('send failed: ' + e.message, 'err');
+  } finally {
+    $('send').disabled = false;
+  }
+};
+</script>
+</body>
+</html>
